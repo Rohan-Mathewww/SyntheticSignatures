@@ -1,0 +1,10 @@
+# training
+#python main.py --root ../images/signatures/sign1.png  --gen-model g_multipixelattention --dis-model d_snpixelattention \
+#--seed 42 --num-steps 2 > termOutput1.log 2>&1
+
+#evaluating
+python main.py --root ../images/signatures/sign3.png  --evaluation \
+--model-to-load results/2025-01-28_22-14-49/s10/g_multipixelattention_s4001.pth \
+--gen-model g_multipixelattention --dis-model d_snpixelattention \
+--amps-to-load results/2025-01-28_22-14-49/amps.pth \
+--num-steps 5 --batch-size 8 > termOutput2.log 2>&1
