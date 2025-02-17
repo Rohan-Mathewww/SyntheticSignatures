@@ -1,5 +1,5 @@
 import utils.misc as misc
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 class RecoderX():
     def __init__(self, log_dir):
@@ -30,7 +30,9 @@ class RecoderX():
         self.writer.add_figure(tag, figure, global_step=global_step, close=close, walltime=walltime)
 
     def export_json(self, out_file):
-        self.writer.export_scalars_to_json(out_file)
+        # raise not implemented
+        raise NotImplementedError("torch.utils.tensorboard does not support exporting scalars to JSON.")
+        #self.writer.export_scalars_to_json(out_file)
 
     def close(self):
         self.writer.close()

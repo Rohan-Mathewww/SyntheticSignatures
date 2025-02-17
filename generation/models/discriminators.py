@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.nn.utils.spectral_norm import spectral_norm as SpectralNorm
 
-__all__ = ['d_vanilla', 'd_snvanilla']
+__all__ = ['d_vanilla', 'd_snvanilla', 'd_snpixelattention']
 
 def initialize_model(model, scale=1.):
     for m in model.modules():
@@ -45,6 +45,8 @@ class Vanilla(nn.Module):
         
         # classifier
         self.classifier = nn.Conv2d(in_channels=max(f, min_features), out_channels=1, kernel_size=kernel_size, padding=padding)
+
+        
         
         # initialize weights
         initialize_model(self)
@@ -52,6 +54,42 @@ class Vanilla(nn.Module):
     def forward(self, x):
         x = self.features(x)
         x = self.classifier(x)
+        return x
+
+class PixelAttention(nn.Module):
+    def __init__(self, in_channels, max_features, min_features, num_blocks, kernel_size, padding, normalization):
+        super(PixelAttention, self).__init__()
+        # features
+        blocks = [BasicBlock(in_channels=in_channels, out_channels=max_features, kernel_size=kernel_size, padding=padding, normalization=normalization)]
+        for i in range(0, num_blocks - 2):
+            f = max_features // pow(2, (i+1))
+            blocks.append(BasicBlock(in_channels=max(min_features, f * 2), out_channels=max(min_features, f), kernel_size=kernel_size, padding=padding, normalization=normalization))
+        self.features = nn.Sequential(*blocks)
+        
+        # classifier
+        self.classifier = nn.Conv2d(in_channels=max(f, min_features), out_channels=1, kernel_size=kernel_size, padding=padding)
+        
+        #pixel_attention
+        pixelBlocks = []
+        for i in range(3):
+            subblock = nn.Sequential(
+                nn.Conv2d(in_channels = 1, out_channels = 1, kernel_size=kernel_size, padding='same'),
+                nn.ReLU(),
+            )
+            pixelBlocks.append(subblock)
+        pixelBlocks.append(nn.Sigmoid())
+        self.pixelAttention = nn.Sequential(*pixelBlocks)
+
+        # initialize weights
+        initialize_model(self)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.classifier(x)
+
+        pixel_attention = self.pixelAttention(x)
+
+        x = x * pixel_attention
         return x
 
 def d_vanilla(**config):
@@ -75,3 +113,14 @@ def d_snvanilla(**config):
     config.setdefault('normalization', True)
     
     return Vanilla(**config)
+
+def d_snpixelattention(**config):
+    config.setdefault('in_channels', 3)
+    config.setdefault('min_features', 32)
+    config.setdefault('max_features', 32)
+    config.setdefault('num_blocks', 5)
+    config.setdefault('kernel_size', 3)
+    config.setdefault('padding', 0)
+    config.setdefault('normalization', True)
+    
+    return PixelAttention(**config)

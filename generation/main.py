@@ -22,8 +22,10 @@ def get_arguments():
     parser.add_argument('--num-blocks', default=5, type=int, help=' (default: 5)')
     parser.add_argument('--kernel-size', default=3, type=int, help=' (default: 3)')
     parser.add_argument('--padding', default=0, type=int, help=' (default: 0)')
+    parser.add_argument('--input-img-channels', default=3, type=int, help=' (default: 3)')
     
     parser.add_argument('--root', default='', help='image source')
+    parser.add_argument('--dir-name', default='', help='directory name')
     parser.add_argument('--min-size', default=25, type=int, help='minimum scale size (default: 25)')
     parser.add_argument('--max-size', default=250, type=int, help='maximum scale size  (default: 250)')
     parser.add_argument('--scale-factor-init', default=0.75, type=float, help='initilize scaling factor (default: 0.75)')
@@ -44,18 +46,19 @@ def get_arguments():
 
     parser.add_argument('--seed', default=-1, type=int, help='random seed (default: random)')
     parser.add_argument('--print-every', default=200, type=int, help='print-every (default: 200)')
-    parser.add_argument('--eval-every', default=100, type=int, help='eval-every (default: 100)')
+    parser.add_argument('--eval-every', default=1000, type=int, help='eval-every (default: 1000)')
     parser.add_argument('--results-dir', metavar='RESULTS_DIR', default='./results', help='results dir')
     parser.add_argument('--save', metavar='SAVE', default='', help='saved folder')
     parser.add_argument('--evaluation', default=False, action='store_true', help='evaluate a model (default: false)')
     parser.add_argument('--model-to-load', default='', help='evaluating from file (default: None)')
     parser.add_argument('--amps-to-load', default='', help='evaluating from file (default: None)')
-    parser.add_argument('--use-tb', default=False, action='store_true', help='use tensorboardx (default: false)')
+    parser.add_argument('--use-tb', default=False, action='store_true', help='use torch.utils.tensorboard (default: false)')
     args = parser.parse_args()
 
     time_stamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     if args.save == '':
-        args.save = time_stamp
+        #args.save = time_stamp
+        args.save = f"{args.dir_name}${time_stamp}" if args.dir_name else time_stamp
     args.save_path = path.join(args.results_dir, args.save)
     if args.seed == -1:
         args.seed = randint(0, 12345)

@@ -5,7 +5,7 @@ from utils.core import imresize
 from copy import deepcopy
 from torch.nn import functional as F
 
-__all__ = ['g_multivanilla']
+__all__ = ['g_multivanilla','g_multipixelattention']
 
 def initialize_model(model, scale=1.):
     for m in model.modules():
@@ -36,12 +36,13 @@ class Vanilla(nn.Module):
     def __init__(self, in_channels, max_features, min_features, num_blocks, kernel_size, padding):
         super(Vanilla, self).__init__()
         # parameters
-        self.padding = (kernel_size // 2) * num_blocks
+        self.padding = (kernel_size // 2) * num_blocks #to ensure same size of input and output.
 
         # features
         blocks = [BasicBlock(in_channels=in_channels, out_channels=max_features, kernel_size=kernel_size, padding=padding)]
         for i in range(0, num_blocks - 2):
-            f = max_features // pow(2, (i+1))
+            f = max_features // pow(2, (i+1)) # as we go deeper, we reduce the num of feature maps.
+            #the idea is that the deeper we go, the more abstract the features become.
             blocks.append(BasicBlock(in_channels=max(min_features, f * 2), out_channels=max(min_features, f), kernel_size=kernel_size, padding=padding))
         self.features = nn.Sequential(*blocks)
         
@@ -60,8 +61,56 @@ class Vanilla(nn.Module):
         
         return x + z
 
-class MultiVanilla(nn.Module):
+
+class PixelAttention(nn.Module):
     def __init__(self, in_channels, max_features, min_features, num_blocks, kernel_size, padding):
+        super(PixelAttention, self).__init__()
+        # parameters
+        self.padding = (kernel_size // 2) * num_blocks #to ensure same size of input and output.
+
+        # features
+        blocks = [BasicBlock(in_channels=in_channels, out_channels=max_features, kernel_size=kernel_size, padding=padding)]
+        for i in range(0, num_blocks - 2):
+            f = max_features // pow(2, (i+1)) # as we go deeper, we reduce the num of feature maps.
+            #the idea is that the deeper we go, the more abstract the features become.
+            blocks.append(BasicBlock(in_channels=max(min_features, f * 2), out_channels=max(min_features, f), kernel_size=kernel_size, padding=padding))
+        self.features = nn.Sequential(*blocks)
+
+        pixelBlocks = []
+        for i in range(3):
+            subblock = nn.Sequential(
+                nn.Conv2d(in_channels = in_channels, out_channels = in_channels, kernel_size=kernel_size, padding='same'),
+                nn.ReLU(),
+            )
+            pixelBlocks.append(subblock)
+        pixelBlocks.append(nn.Sigmoid())
+        self.pixelAttention = nn.Sequential(*pixelBlocks)
+        
+        # classifier
+        self.features_to_image = nn.Sequential(
+            nn.Conv2d(in_channels=max(f, min_features), out_channels=in_channels, kernel_size=kernel_size, padding=padding),
+            nn.ReLU())
+        
+        # initialize weights
+        initialize_model(self)
+
+    def forward(self, z, x):
+        z = F.pad(z, [self.padding, self.padding, self.padding, self.padding])
+        z = self.features(z)
+        z = self.features_to_image(z)
+        
+        conv_block_output = x+z
+        pixel_attention = self.pixelAttention(conv_block_output)
+
+        #element wise multiplication for attention
+        output = conv_block_output * pixel_attention
+
+        return output
+
+
+
+class MultiVanilla(nn.Module):
+    def __init__(self, in_channels, max_features, min_features, num_blocks, kernel_size, padding, base_model_type):
         super(MultiVanilla, self).__init__()
         # parameters
         self.in_channels = in_channels
@@ -73,9 +122,17 @@ class MultiVanilla(nn.Module):
         self.scale = 0
         self.key = 's0'
         self.scale_factor = 0
+        self.base_model_type = base_model_type
+        #self.device = device
 
         # current
-        self.curr = Vanilla(in_channels, max_features, min_features, num_blocks, kernel_size, padding)
+        if self.base_model_type == 'vanilla':
+            self.curr = Vanilla(in_channels, max_features, min_features, num_blocks, kernel_size, padding)#.to(self.device)
+        elif self.base_model_type == 'pixelattention':
+            self.curr = PixelAttention(in_channels, max_features, min_features, num_blocks, kernel_size, padding)#.to(self.device)
+        else:
+            raise ValueError("Invalid base_model_type. Choose either 'vanilla' or 'pixelattention'.")
+
         self.prev = nn.Module()
 
     def add_scale(self, device):
@@ -83,14 +140,17 @@ class MultiVanilla(nn.Module):
 
         # previous
         self.prev.add_module(self.key, deepcopy(self.curr))
-        self._reset_grad(self.prev, False)
+        self._reset_grad(self.prev, False) #resets everything in the previous layers to doesnt require grad.
         self.key = 's{}'.format(self.scale)
 
         # current
         max_features = min(self.max_features * pow(2, math.floor(self.scale / 4)), 128)
         min_features = min(self.min_features * pow(2, math.floor(self.scale / 4)), 128)
         if math.floor(self.scale / 4) != math.floor((self.scale - 1) / 4):
-            self.curr = Vanilla(self.in_channels, max_features, min_features, self.num_blocks, self.kernel_size, self.padding).to(device)
+            if self.base_model_type == 'vanilla':
+                self.curr = Vanilla(self.in_channels, max_features, min_features, self.num_blocks,self.kernel_size, self.padding).to(device)
+            else:
+                self.curr = PixelAttention(self.in_channels, max_features, min_features, self.num_blocks,self.kernel_size, self.padding).to(device)
 
     def _compute_previous(self, reals, amps, noises=None):
         # parameters
@@ -134,7 +194,8 @@ class MultiVanilla(nn.Module):
             noise = torch.randn(tensor_like.size()).to(tensor_like.device)
         else:
             noise = torch.randn((tensor_like.size(0), 1, tensor_like.size(2), tensor_like.size(3)))
-            noise = noise.repeat((1, 3, 1, 1)).to(tensor_like.device)
+            #noise = noise.repeat((1, 3, 1, 1)).to(tensor_like.device)
+            noise = noise.repeat((1, tensor_like.size(1), 1, 1)).to(tensor_like.device) #cuz its not necessary the input is RGB
 
         return noise
 
@@ -162,5 +223,19 @@ def g_multivanilla(**config):
     config.setdefault('num_blocks', 5)
     config.setdefault('kernel_size', 3)
     config.setdefault('padding', 0)
+    #config.setdefault('base_model_type', 'vanilla')
+    config['base_model_type'] = 'vanilla'
+
+    return MultiVanilla(**config)
+
+def g_multipixelattention(**config):
+    config.setdefault('in_channels', 3)
+    config.setdefault('min_features', 32)
+    config.setdefault('max_features', 32)
+    config.setdefault('num_blocks', 5)
+    config.setdefault('kernel_size', 3)
+    config.setdefault('padding', 0)
+    #config.setdefault('base_model_type', 'vanilla')
+    config['base_model_type'] = 'pixelattention'
     
     return MultiVanilla(**config)
